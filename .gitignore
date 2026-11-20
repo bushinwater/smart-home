@@ -1,0 +1,9 @@
+# .NET build
+bin/
+obj/
+
+# IDE files
+.vs/
+.vscode/
+.idea/
+*.user/
