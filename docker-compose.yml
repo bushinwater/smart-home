@@ -1,0 +1,9 @@
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2 # newest mosquitto 2.x version
+    container_name: mosquitto
+    ports:
+      - "127.0.0.1:1883:1883"
+    volumes:
+      - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro # read only: container cant change it
+    restart: unless-stopped # auto startup broker after Docker/PC restart, unless it was stopped manualy 
