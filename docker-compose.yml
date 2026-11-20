@@ -7,5 +7,5 @@ services:
     volumes:
       - ./infra/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro # read only: container cant change it
       - ./infra/mosquitto/passwd:/mosquitto/config/passwd:ro
-      - ./infra mosquitto/acl:/mosquitto/config/acl:ro
+      - ./infra/mosquitto/acl:/mosquitto/config/acl:ro
     restart: unless-stopped # auto startup broker after Docker/PC restart, unless it was stopped manually 
