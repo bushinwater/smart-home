@@ -1,0 +1,21 @@
+# access rules
+# anything not listed is denied
+
+user backend
+topic write home/heating/set
+topic write home/lock/unlock
+topic write home/climate/send
+topic read home/#
+
+user esp32-main
+topic write home/devices/esp32-main/status
+topic write home/sensors/+/state
+topic write home/heating/state
+topic write home/lock/event
+topic write home/climate/state
+topic write home/mailbox/state
+topic write home/mailbox/event
+topic write home/panel/button/event
+topic read home/heating/set
+topic read home/lock/unlock
+topic read home/climate/send

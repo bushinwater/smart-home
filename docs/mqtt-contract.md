@@ -1,4 +1,4 @@
-# MQTT ugovor (v0.2)
+# MQTT ugovor (v0.3)
 
 Ugovor između ESP32 (pravog ili simulatora) i backenda. Ko god poštuje ovaj dokument, može da zameni drugu stranu.
 
@@ -22,29 +22,17 @@ Ugovor između ESP32 (pravog ili simulatora) i backenda. Ko god poštuje ovaj do
 
 ## 2. Status uređaja
 
-`home/devices/<deviceId>/status`: retained, QoS 1.
+`home/devices/<deviceId>/status`: retained, QoS 1. Jedini uređaj je `esp32-main`. Na njemu su sve funkcije, uključujući i sanduče.
 
-| deviceId | Napajanje | Kako backend zna da je uređaj živ |
-|---|---|---|
-| `esp32-main` | stalno | Last Will (`online: false`) |
-| `esp32-mailbox` | baterija, deep sleep | heartbeat: ako nema poruke duže od 2× intervala buđenja, uređaj je nedostupan |
-
-`esp32-main` posle povezivanja:
+Posle povezivanja:
 ```json
 { "online": true, "firmware": "0.1.0" }
 ```
 
-Last Will za `esp32-main` (broker je sam objavi kad veza pukne):
+Last Will (broker je sam objavi kad veza pukne):
 ```json
 { "online": false }
 ```
-
-`esp32-mailbox` pri svakom buđenju:
-```json
-{ "online": true, "firmware": "0.1.0", "battery": 87 }
-```
-- `battery` je u procentima.
-- Last Will se ovde **ne koristi**. Uređaj pre spavanja uredno prekine vezu, a broker Last Will objavljuje samo kad veza pukne neočekivano. Zato bi „offline“ značilo samo „spava“, a to je normalno stanje ovog uređaja.
 
 ## 3. Senzori
 
@@ -117,9 +105,9 @@ IR je jednosmeran, pa ESP32 ne zna stvarno stanje klime, već samo šta je posla
 
 ## 7. Poštansko sanduče
 
-Poseban uređaj `esp32-mailbox` (baterija, deep sleep). Ugovor ne zavisi od vrste senzora (prekidač na poklopcu, senzor razdaljine…). ESP32 samo javlja da li u sandučetu ima nečega.
+Sanduče je pored ulaznih vrata, a senzor je žicom povezan na `esp32-main` (istim kablom kao brava i DS18B20). Ugovor ne zavisi od vrste senzora (prekidač, senzor razdaljine…). ESP32 samo javlja da li u sandučetu ima nečega.
 
-`home/mailbox/state` (ESP32 → backend, pri svakom buđenju):
+`home/mailbox/state` (ESP32 → backend, odmah posle povezivanja i pri svakoj promeni):
 ```json
 { "hasMail": true }
 ```
@@ -130,8 +118,8 @@ Poseban uređaj `esp32-mailbox` (baterija, deep sleep). Ugovor ne zavisi od vrst
 { "type": "mailCollected" }
 ```
 - `state` služi za prikaz na panelu (retained, pa backend zna stanje i posle restarta).
-- `event` služi za notifikaciju na panel i telefon. Šalje se jednom po promeni, pa se notifikacija ne ponavlja pri svakom buđenju.
-- ESP32 poslednje stanje pamti u RTC memoriji, koja preživi deep sleep, i po njemu zna da li se nešto promenilo.
+- `event` služi za notifikaciju na panel i telefon. Šalje se tačno jednom po promeni.
+- ESP32 filtrira treperenje senzora (debounce), npr. promena važi tek kad je stabilna 1–2 s. Tako jedno ubacivanje pisma ne pravi niz `mailArrived`/`mailCollected`.
 
 ## 8. Fizička dugmad na panelu
 
@@ -144,12 +132,11 @@ Dugme za otključavanje je opisano u sekciji 5 (`home/lock/event`, `source: "but
 
 ## 9. Pristup brokeru (ACL)
 
-Svaki uređaj sme da objavljuje **samo svoje** topic-e. Zato se oni navode pojedinačno, a ne preko džokera kao `home/+/state`, jer bi on dozvolio i tuđe topic-e.
+Svaki korisnik sme da objavljuje **samo ono što mu pripada**. Zato se topic-i navode pojedinačno, a ne preko džokera kao `home/+/state`. Takav džoker bi uređaju dozvolio i topic-e koje mu ne pripadaju. Na primer, kad se doda nov uređaj, stari bi mogao da ga glumi.
 
 | Korisnik | Sme da objavljuje (publish) | Sme da se pretplati (subscribe) |
 |---|---|---|
 | `backend` | `home/heating/set`, `home/lock/unlock`, `home/climate/send` | `home/#` |
-| `esp32-main` | `home/devices/esp32-main/status`, `home/sensors/+/state`, `home/heating/state`, `home/lock/event`, `home/climate/state`, `home/panel/button/event` | `home/heating/set`, `home/lock/unlock`, `home/climate/send` |
-| `esp32-mailbox` | `home/devices/esp32-mailbox/status`, `home/mailbox/state`, `home/mailbox/event` | ništa |
+| `esp32-main` | `home/devices/esp32-main/status`, `home/sensors/+/state`, `home/heating/state`, `home/lock/event`, `home/climate/state`, `home/mailbox/state`, `home/mailbox/event`, `home/panel/button/event` | `home/heating/set`, `home/lock/unlock`, `home/climate/send` |
 
 Samo `backend` sme da pošalje `unlock`. Backend pre slanja proverava ko traži otključavanje.
