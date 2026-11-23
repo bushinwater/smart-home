@@ -1,19 +1,21 @@
 ﻿
 // credentials line in user-secrets
 using System.Text.Json;
+using SmartHome.Simulator;
 using Microsoft.Extensions.Configuration;
 using MQTTnet;
 using MQTTnet.Protocol;
 
 var config = new ConfigurationBuilder().AddUserSecrets<Program>().Build();
 
-var username = config["Mqtt:Username"] ?? throw new InvalidOperationException("Mqtt: Useername is not set in user-secrets");
+var username = config["Mqtt:Username"] ?? throw new InvalidOperationException("Mqtt: Username is not set in user-secrets");
 var password = config["Mqtt:Password"] ?? throw new InvalidOperationException("Mqtt: Password is not set in user-secrets");
 
 var factory = new MqttClientFactory();
 using var client = factory.CreateMqttClient();
 
 var statusTopic = "home/devices/esp32-main/status";
+var heating = new Heating();
 
 var options = new MqttClientOptionsBuilder()
     .WithTcpServer("localhost", 1883)
@@ -27,6 +29,21 @@ var options = new MqttClientOptionsBuilder()
     .WithWillRetain()
     .Build();
 
+// Called by MQTTNet for every msg that arrives on a topic we subscribed
+client.ApplicationMessageReceivedAsync += async e =>
+{
+    var topic = e.ApplicationMessage.Topic;
+    var payload = e.ApplicationMessage.ConvertPayloadToString();
+    Console.WriteLine($"Recieved {topic} {payload}");
+
+    if (topic == "home/heating/set")
+    {
+        if (!heating.Apply(payload)) Console.WriteLine("Invalid heating command, ignored!");
+
+        await PublishStateAsync("home/heating/state", heating.ToJson(), MqttQualityOfServiceLevel.AtLeastOnce);
+    }
+};
+
 // ConnectAsync does not throw when the broker refuses us, so we must check the result
 var result  = await client.ConnectAsync(options);
 if (result.ResultCode != MqttClientConnectResultCode.Success)
@@ -36,35 +53,34 @@ if (result.ResultCode != MqttClientConnectResultCode.Success)
 }
 Console.WriteLine("Connected to MQTT broker");
 
-var status = JsonSerializer.Serialize(new { online = true, firmware = "0.1.0" });
-var statusMessage = new MqttApplicationMessageBuilder()
-    .WithTopic(statusTopic)
-    .WithPayload(status)
-    .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
-    .WithRetainFlag()
-    .Build();
+await client.SubscribeAsync("home/heating/set", MqttQualityOfServiceLevel.AtLeastOnce);
+Console.WriteLine("Subscribed to home/heating/set");
 
-await client.PublishAsync(statusMessage);
-Console.WriteLine($"Published {statusTopic} {status}");
+var status = JsonSerializer.Serialize(new { online = true, firmware = "0.1.0" });
+await PublishStateAsync(statusTopic, status,  MqttQualityOfServiceLevel.AtLeastOnce);
+await PublishStateAsync("home/heating/state", heating.ToJson(), MqttQualityOfServiceLevel.AtLeastOnce);
 
 using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
 do
 {
     var state = new
     {
-        temperature = Math.Round(21.5 + Random.Shared.NextDouble() * 10, 1),
+        temperature = Math.Round(21.5 + Random.Shared.NextDouble(), 1),
         humidity = Math.Round(40 + Random.Shared.NextDouble() * 10, 1)
     };
-    var payload = JsonSerializer.Serialize(state);
-
-    var message = new MqttApplicationMessageBuilder()
-        .WithTopic("home/sensors/indoor/state")
-        .WithPayload(payload)
-        .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtMostOnce)
-        .WithRetainFlag()
-        .Build();
-
-    await client.PublishAsync(message);
-    Console.WriteLine($"Published home/sensors/indoor/state {payload}");
+    await PublishStateAsync("home/sensors/indoor/state", JsonSerializer.Serialize(state), MqttQualityOfServiceLevel.AtLeastOnce);
 }
 while (await timer.WaitForNextTickAsync());
+
+async Task PublishStateAsync(string topic, string payload, MqttQualityOfServiceLevel qos)
+{
+    var message = new MqttApplicationMessageBuilder()
+        .WithTopic(topic)
+        .WithPayload(payload)
+        .WithQualityOfServiceLevel(qos)
+        .WithRetainFlag()
+        .Build()
+
+    await client.PublishAsync(message);
+    Console.WriteLine($"Published {topic} {payload}");
+}
