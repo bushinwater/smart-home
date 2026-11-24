@@ -4,7 +4,7 @@ namespace SmartHome.Simulator;
 public class Room
 {
     private const double HeatingPerMinute = 0.5; // 0.5 celsius per minute while boiler is on
-    private const double HeatingLossPerMinute = 0.02; // 2% goes toward outside from inside
+    private const double HeatLossPerMinute = 0.02; // 2% goes toward outside from inside
 
     public double Temperature { get; private set; } = 20.0;
     public double OutdoorTemperature { get; } = 5.0;
