@@ -1,4 +1,4 @@
-﻿
+﻿using System.Diagnostics;
 // credentials line in user-secrets
 using System.Text.Json;
 using SmartHome.Simulator;
@@ -16,6 +16,9 @@ using var client = factory.CreateMqttClient();
 
 var statusTopic = "home/devices/esp32-main/status";
 var heating = new Heating();
+var room = new Room();
+// last value the "sensor" measured; the thermostat and the command handler both use it
+var lastIndoorTemperature = room.Temperature;
 
 var options = new MqttClientOptionsBuilder()
     .WithTcpServer("localhost", 1883)
@@ -34,11 +37,14 @@ client.ApplicationMessageReceivedAsync += async e =>
 {
     var topic = e.ApplicationMessage.Topic;
     var payload = e.ApplicationMessage.ConvertPayloadToString();
-    Console.WriteLine($"Recieved {topic} {payload}");
+    Console.WriteLine($"Received {topic} {payload}");
 
     if (topic == "home/heating/set")
     {
         if (!heating.Apply(payload)) Console.WriteLine("Invalid heating command, ignored!");
+
+        // react to the target right away
+        heating.Update(lastIndoorTemperature);
 
         await PublishStateAsync("home/heating/state", heating.ToJson(), MqttQualityOfServiceLevel.AtLeastOnce);
     }
@@ -60,15 +66,27 @@ var status = JsonSerializer.Serialize(new { online = true, firmware = "0.1.0" })
 await PublishStateAsync(statusTopic, status,  MqttQualityOfServiceLevel.AtLeastOnce);
 await PublishStateAsync("home/heating/state", heating.ToJson(), MqttQualityOfServiceLevel.AtLeastOnce);
 
+var clock = Stopwatch.StartNew();
 using var timer = new PeriodicTimer(TimeSpan.FromSeconds(30));
 do
 {
+    // forward by the real time that passed
+    room.Update(clock.Elapsed, heating.BoilerOn);
+    clock.Restart();
+
+    // real sensor is never exact
+    lastIndoorTemperature = Math.Round(room.Temperature + (Random.Shared.NextDouble() - 0.5) * 0.2, 1);
+
     var state = new
     {
-        temperature = Math.Round(21.5 + Random.Shared.NextDouble(), 1),
+        temperature = lastIndoorTemperature,
         humidity = Math.Round(40 + Random.Shared.NextDouble() * 10, 1)
     };
-    await PublishStateAsync("home/sensors/indoor/state", JsonSerializer.Serialize(state), MqttQualityOfServiceLevel.AtLeastOnce);
+    await PublishStateAsync("home/sensors/indoor/state", JsonSerializer.Serialize(state), MqttQualityOfServiceLevel.AtMostOnce);
+
+    // theromstat runs on the ESP32; publihs only when the boiler acutaly switches
+    if (heating.Update(lastIndoorTemperature))
+        await PublishStateAsync("home/heating/state", heating.ToJson(), MqttQualityOfServiceLevel.AtLeastOnce);
 }
 while (await timer.WaitForNextTickAsync());
 
@@ -79,7 +97,7 @@ async Task PublishStateAsync(string topic, string payload, MqttQualityOfServiceL
         .WithPayload(payload)
         .WithQualityOfServiceLevel(qos)
         .WithRetainFlag()
-        .Build()
+        .Build();
 
     await client.PublishAsync(message);
     Console.WriteLine($"Published {topic} {payload}");
